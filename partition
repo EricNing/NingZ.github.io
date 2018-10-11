@@ -1,0 +1,169 @@
+### **`查看执行计划`**  
+
+    SET AUTOTRACE ON;  
+    
+	SET AUTOTRACE OFF 此为默认值，即关闭Autotrace
+	SET AUTOTRACE ON 产生结果集和解释计划并列出统计
+	SET AUTOTRACE ON EXPLAIN 显示结果集和解释计划不显示统计
+	SETAUTOTRACE TRACEONLY 显示解释计划和统计，尽管执行该语句但您将看不到结果集
+	SET AUTOTRACE TRACEONLY STATISTICS 只显示统计
+
+###  **`创建range分区表`**
+
+    create table H3C_NETWORK_INTERFACE_HIS
+    (
+      DEVICE_ID           NUMBER,
+      INSERTTIME          DATE,
+      BATCH_NO            NUMBER
+    )
+    PARTITION BY RANGE(INSERTTIME)
+    (
+    PARTITION H3C_INTERFACE_20181008 VALUES LESS THAN (TO_DATE('2018-10-08','YYYY-MM-DD')) `TABLESPACE TABLESPACE_NAME(指定 
+    表空间`),
+    PARTITION H3C_INTERFACE_20181009 VALUES LESS THAN (TO_DATE('2018-10-09','YYYY-MM-DD')),
+    PARTITION H3C_INTERFACE_20181010 VALUES LESS THAN (TO_DATE('2018-10-10','YYYY-MM-DD')),
+    PARTITION H3C_INTERFACE_20181011 VALUES LESS THAN (TO_DATE('2018-10-11','YYYY-MM-DD'))
+    );
+
+##### _**增加分区**_
+
+alter table H3C_NETWORK_INTERFACE_HIS add partition H3C_INTERFACE_20181012 values less than (TO_DATE('2018-10-12','YYYY-MM-DD')) -- tablespace tablespace_name (指定表空间名);
+
+##### _**重命名分区**_
+
+alter table H3C_NETWORK_INTERFACE_HIS rename partition H3C_INTERFACE_20181012_1 to H3C_INTERFACE_20181012;
+
+##### _**合并分区**_
+
+    alter table H3C_NETWORK_INTERFACE_HIS merge partitions H3C_INTERFACE_20181008,H3C_INTERFACE_20181009 into partition H3C_INTERFACE_20181009;
+
+##### _**拆分分区**_
+
+    spilt partition 分区名 at(这里是一个临界区，比如：TO_DATE('2018-10-08','YYYY-MM-DD')就是说小于TO_DATE('2018-10-08','YYYY- 
+    MM-DD')的放在H3C_INTERFACE_20181009，而大于TO_DATE('2018-10-08','YYYY-MM-DD'的放在H3C_INTERFACE_20181009中)  
+    alter table H3C_NETWORK_INTERFACE_HIS split partition H3C_INTERFACE_20181009 at (TO_DATE('2018-10-08','YYYY-MM-DD')) 
+    into (Partition H3C_INTERFACE_20181008, Partition H3C_INTERFACE_20181009);
+
+##### _**删除分区**_
+
+    alter table H3C_NETWORK_INTERFACE_HIS drop partition H3C_INTERFACE_20181008;
+
+##### _**查询分区**_
+
+    select * from user_tab_partitions where table_name=upper('H3C_NETWORK_INTERFACE_HIS');
+
+##### _**清空分区数据**_
+
+    ALTER TABLE H3C_NETWORK_INTERFACE_HIS TRUNCATE PARTITION H3C_INTERFACE_20181008;
+
+##### _**修改分区所属表空间**_
+    alter table ptest_itv move partition PTEST_ITV_20180701 tablespace h3c_data;
+    alter table xxx set store in 
+    alter table modify default attributes tablespace...
+
+
+### **`创建interval间隔分区，自动维护分区`**
+
+	drop table ptest_itv;
+	create table ptest_itv(
+	id number,
+	clock date
+	)partition by range(clock)
+	interval (numtoyminterval(1,'month')) store in (h3c_data,zabbix)  **store in 定义扩展分区所属表空间，可以定义多个
+	(
+	partition ptest_itv_20180701 values less than (to_date('2018-08-01','yyyy-mm-dd')) tablespace h3c_data  ** 预定义分区表 
+	空间
+	);
+	设置store in，未设置预定义分区表空间，则预定义分区使用默认表空间USERS，扩展分区循环使用STORE IN中定义分区。 
+	未设置store in, 设置预定义分区表空间，则预定义分区使用定义的表空间，扩展分区使用默认表空间USERS。 
+	设置store in, 设置预定义分区表空间，则预定义分区和扩展分区均会使用STORE IN中定义分区。 
+	STORE IN参数的作用域就是扩展分区，预定义分区需要明确写出表空间，否则使用的使用户默认表空间。	
+
+	begin
+	  for i in 1..10 loop
+		insert into ptest_itv values(i,add_months(to_date('2018-06-01','yyyy-mm-dd'),i));
+		commit;
+	  end loop;
+	end;
+
+	select * from ptest_itv;  
+	select * from user_tab_partitions where table_name=upper('ptest_itv');  
+	select * from user_part_tables where table_name=upper('ptest_itv');
+
+### **`全局分区索引`**
+
+    global
+
+### **`本地分区索引`**
+
+    local索引的分区维护完全依赖于其索引所在表，即和分区表的分区保持一致
+    create index idx_ptest_itv on ptest_itv(clock) local;
+
+##### _**查询分区索引**_
+
+	select * from user_ind_partitions where index_name=upper('idx_ptest_itv');  
+	select * from user_part_indexes where index_name=upper('idx_ptest_itv');
+	insert into ptest_itv values(18,add_months(to_date('2019-06-01','yyyy-mm-dd'),0));
+	insert into ptest_itv values(20,to_date('2018-06-01','yyyy-mm-dd'));
+	commit;
+	select * from ptest_itv partition(PTEST_ITV_20180701) where clock=to_date('2018-06-01','yyyy-mm-dd');
+	ALTER TABLE ptest_itv TRUNCATE PARTITION PTEST_ITV_20180701;
+	select * from ptest_itv where clock=to_date('2018-06-01','yyyy-mm-dd');
+	select * from user_tab_partitions where table_name=upper('ptest_itv');
+
+	numtodsinterval(x,c) ,x是一个数字,c是一个字符串,
+	表明x的单位,这个函数把x转为interval day to second数据类型
+	常用的单位有 ('day','hour','minute','second')
+
+	numtoyminterval 与numtodsinterval函数类似,将x转为interval year to month数据类型
+	常用的单位有'year','month'
+
+	example:
+
+	  select add_months(to_date('2018-06-01','yyyy-mm-dd'),1)+numtoyminterval(1,'month') from dual;
+
+	  2018-08-01 00:00:00
+
+
+### **`磁盘碎片压缩`**
+
+	对分区表的某分区进行磁盘压缩，当对分区内部数据进行了大量的UPDATE、DELETE操作后，一定时间需要进行磁盘压缩，否则在查询时，若通过FULL SCAN扫描数据，将会把空块也会扫描到，
+	对表进行磁盘压缩需要进行行迁移操作，所以首先需要操作：
+	ALTER TABLE ENABLE ROW MOVEMENT ;
+
+	对分区表的某分区压缩语法为：
+	ALTER TABLE modify partition shrink space;
+
+	对普通表压缩：
+	ALTER TABLE shrink space;
+
+	对于索引也需要进行压缩，索引也是表
+	ALTER INDEX shrink space;
+
+### **`分区表重新分析以及索引重新分析`**
+
+	对表进行压缩后，需要对表和索引进行重新分析，对表进行重新分析，一般有两种方式：
+	在ORACLE 10G以前，使用:
+	BEGIN
+		  dbms_stats.gather_table_stats(USER,UPPER(''));
+	END;
+
+	ORACLE 10G后，可以使用:
+	ANALYZE TABLE COMPUTE STATISTICS;
+
+	索引重新分析，将上述两种方式分别修改一下
+	如第一种可以使用：gather_index_stats，
+	而第二种修改为：ANALYZE INDEX即可，
+	不过一般比较常用的是重新编译：
+	对于分区表并进行了索引分区的情况，需要对每个分区的索引进行重新编译,
+	这里以LOCAL索引为例子（其每个索引的分区和表分区结构相同，默认分区名称和表分区名称相同）：
+	ALTER INDEX REBUILD PARTITION ;
+
+	对于全局索引，根据全局索引锁定义的分区名称修改即可，若没有分区，和普通单表索引重新编译方式相同：
+	ALTER INDEX REBUILD;
+
+	1、关联对象重新编译
+	上述对表、索引进行重新编译，尤其对表进行了压缩后会产生行迁移，这个过程可能会导致一些视图、过程对象的失效，此时要将其重新编译一次。
+
+	2、扩展：HASH分区中，如果创建了新的分区，可以将其进行重新HASH分布：
+	ALTER TABLE COALESCA PARTITION
